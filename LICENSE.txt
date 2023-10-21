@@ -1,0 +1,4 @@
+This software contains source code provided by NVIDIA Corporation.
+
+----
+The code created by NVIDIA is subject to the contents of LICENCE-nv.txt, while the portions created by TaigaTakano are subject to the Apache-2.0 license.

@@ -1,0 +1,89 @@
+FROM nvcr.io/nvidia/isaac/ros:aarch64-ros2_humble_42f50fd45227c63eb74af1d69ddc2970
+
+COPY scripts/build-librealsense.sh /opt/realsense/build-librealsense.sh
+COPY scripts/install-realsense-dependencies.sh /opt/realsense/install-realsense-dependencies.sh
+
+RUN chmod +x /opt/realsense/install-realsense-dependencies.sh && /opt/realsense/install-realsense-dependencies.sh
+RUN chmod +x /opt/realsense/build-librealsense.sh && /opt/realsense/build-librealsense.sh
+
+# Copy hotplug script which will get invoked whenever a devices plugged or un-plugged
+RUN mkdir -p /opt/realsense/
+COPY scripts/hotplug-realsense.sh /opt/realsense/hotplug-realsense.sh
+
+# Copy custom udev rules file
+COPY udev_rules/99-realsense-libusb-custom.rules /etc/udev/rules.d/99-realsense-libusb-custom.rules
+
+ARG ZED_SDK_MAJOR=4
+ARG ZED_SDK_MINOR=0
+
+# zed-ros2-wrapper dependencies
+RUN apt-get update && apt-get install -y \
+    libgeographic-dev  \
+    ros-humble-geographic-info \
+    ros-humble-nmea-msgs \
+    ros-humble-robot-localization \
+    ros-humble-xacro \
+&& rm -rf /var/lib/apt/lists/* \
+&& apt-get clean
+
+RUN mkdir -p /opt/zed/
+
+# The zed installation script expects to be run as non-root user and needs the USER ENV variable to be set
+COPY scripts/install-zed-x86_64.sh /opt/zed/install-zed-x86_64.sh
+COPY scripts/install-zed-aarch64.sh /opt/zed/install-zed-aarch64.sh
+
+RUN sudo chmod +x /opt/zed/install-zed-x86_64.sh
+RUN sudo chmod +x /opt/zed/install-zed-aarch64.sh
+
+RUN if [ "$(uname -m)" = "x86_64" ]; then \
+    /opt/zed/install-zed-x86_64.sh; \
+  else \
+    /opt/zed/install-zed-aarch64.sh; \
+  fi
+
+# Setup non-root admin user
+ARG USERNAME=admin
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+# Install prerequisites
+RUN apt-get update && apt-get install -y \
+        sudo \
+        udev \
+&& rm -rf /var/lib/apt/lists/* \
+&& apt-get clean
+
+# Reuse triton-server user as 'admin' user if exists
+RUN if [ $(getent group triton-server) ]; then \
+        groupmod -o --gid ${USER_GID} -n ${USERNAME} triton-server ; \
+        usermod -l ${USERNAME} -u ${USER_UID} -m -d /home/${USERNAME} triton-server ; \
+        mkdir -p /home/${USERNAME} ; \
+        sudo chown ${USERNAME}:${USERNAME} /home/${USERNAME} ; \
+    fi
+
+# Create the 'admin' user if not already exists
+RUN if [ ! $(getent passwd ${USERNAME}) ]; then \
+        groupadd --gid ${USER_GID} ${USERNAME} ; \
+        useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME} ; \
+    fi
+
+# Update 'admin' user
+RUN echo ${USERNAME} ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/${USERNAME} \
+    && chmod 0440 /etc/sudoers.d/${USERNAME} \
+    && adduser ${USERNAME} video && adduser ${USERNAME} plugdev && adduser ${USERNAME} sudo
+
+# Copy scripts
+RUN mkdir -p /usr/local/bin/scripts
+COPY scripts/*entrypoint.sh /usr/local/bin/scripts/
+RUN  chmod +x /usr/local/bin/scripts/*.sh
+
+# Copy middleware profiles
+RUN mkdir -p /usr/local/share/middleware_profiles
+COPY middleware_profiles/*profile.xml /usr/local/share/middleware_profiles/
+
+ENV USERNAME=${USERNAME}
+ENV USER_GID=${USER_GID}
+ENV USER_UID=${USER_UID}
+
+
+
