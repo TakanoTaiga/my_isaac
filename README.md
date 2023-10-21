@@ -18,7 +18,7 @@ cd ./my_isaac
 #### How to run
 ```
 cd ./my_isaac
-run.sh
+./run.sh
 ```
 
 
